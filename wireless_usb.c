@@ -14,14 +14,15 @@ MODULE_DEVICE_TABLE(hid, hid_example_table);
 
 struct my_hid_driver {
     struct hid_device* device;
+    struct input_dev* input;
 };
 static struct my_hid_driver* drv_data;
 
 /// @b Probe функция для реагирование на присоединение устройства из таблицы,
 /// обязательна для hid-устройства, т.к. для его обработки нужно обязательно:
-/// - hid_parse - 
+/// - hid_parse -
 /// - hid_hw_start - включает HW-буферы, нужно вызывать после hid_parse
-/// - hid_hw_open - говорит HW отправлять события, без него ничего не будет 
+/// - hid_hw_open - говорит HW отправлять события, без него ничего не будет
 ///                 приходить в event
 static int hid_example_probe(struct hid_device* hdev, const struct hid_device_id* id)
 {
@@ -35,15 +36,12 @@ static int hid_example_probe(struct hid_device* hdev, const struct hid_device_id
 
     ret = hid_parse(hdev);
     if (ret) {
-        printk(DEBUG "Failed to parse HID descriptor\n");
-        return ret;
+        goto parse_fail;
     }
 
     ret = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
     if (ret) {
-        hid_hw_stop(hdev);
-        printk(DEBUG "Failed to start HID hardware\n");
-        return ret;
+        goto hw_stop;
     }
 
     hid_set_drvdata(hdev, (void*)id);
@@ -58,12 +56,48 @@ static int hid_example_probe(struct hid_device* hdev, const struct hid_device_id
 
     ret = hid_hw_open(hdev);
     if (ret) {
-        printk(DEBUG " device fail to open\n");
-        return ret;
-    } else {
-        printk(DEBUG " device opened\n");
+        goto hw_close;
+    }
+
+    /// ----------------- INPUT DEVICE ----------------- ///
+    drv_data->input = devm_input_allocate_device(&hdev->dev);
+    if (!drv_data->input) {
+        goto hw_close;
+    }
+    // Настройка input устройства
+    drv_data->input->name = "My Gamepad";
+    drv_data->input->phys = "hid/input0";
+    drv_data->input->id.bustype = BUS_USB;
+    drv_data->input->id.vendor = hdev->vendor;
+    drv_data->input->id.product = hdev->product;
+    drv_data->input->id.version = hdev->version;
+    drv_data->input->dev.parent = &hdev->dev;
+
+    set_bit(EV_REL, drv_data->input->evbit);
+    set_bit(REL_X, drv_data->input->relbit);
+    set_bit(REL_Y, drv_data->input->relbit);
+    set_bit(EV_KEY, drv_data->input->evbit);
+    set_bit(EV_ABS, drv_data->input->evbit);
+
+    input_set_abs_params(drv_data->input, ABS_RX, -128, 127, 4, 8);
+    input_set_abs_params(drv_data->input, ABS_RY, -128, 127, 4, 8);
+    input_set_abs_params(drv_data->input, ABS_Z, -128, 127, 4, 8);
+    input_set_abs_params(drv_data->input, ABS_RZ, -128, 127, 4, 8);
+
+    ret = input_register_device(drv_data->input);
+    if (ret) {
+        goto input_device_clear;
     }
     return 0;
+
+input_device_clear:
+    input_free_device(drv_data->input);
+hw_close:
+    hid_hw_close(hdev);
+hw_stop:
+    hid_hw_stop(hdev);
+parse_fail:
+    return ret;
 }
 
 // ====================== REMOVE функция ======================
@@ -76,6 +110,7 @@ static void hid_example_remove(struct hid_device* hdev)
     } else {
         printk(DEBUG "HID Example: Device removed\n");
     }
+    hid_hw_close(hdev);
     hid_hw_stop(hdev);
     devm_kfree(&hdev->dev, drv_data);
 }
@@ -146,11 +181,19 @@ static int event_occured(struct hid_device* hdev, struct hid_field* field,
             break;
         case EV_ABS:
             printk(DEBUG " range %s: %i\n", to_string_abs(usage->code), value - 128);
+            if (usage->code == ABS_Z) {
+                input_report_abs(drv_data->input, ABS_RY, value - 128);
+                input_report_rel(drv_data->input, REL_Y, value - 128);
+            } else if (usage->code == ABS_RZ) {
+                input_report_abs(drv_data->input, ABS_RX, value - 128);
+                input_report_rel(drv_data->input, REL_X, value - 128);
+            }
             break;
         case EV_SYN:
-            /// @b Синхронизация нужна потому, что устройство шлет 
+            /// @b Синхронизация нужна потому, что устройство шлет
             /// потоком сообщения о всех позициях триггеров и состояниях кнопок,
             /// это сообщение приходит последним из всего потока
+            input_sync(drv_data->input);
             break;
         default:
             printk(DEBUG "HID: [%04x:%04x] type=%d code=%d value=%d\n",
