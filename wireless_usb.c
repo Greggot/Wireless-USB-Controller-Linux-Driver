@@ -64,7 +64,7 @@ static int hid_example_probe(struct hid_device* hdev, const struct hid_device_id
     if (!drv_data->input) {
         goto hw_close;
     }
-    // Настройка input устройства
+
     drv_data->input->name = "My Gamepad";
     drv_data->input->phys = "hid/input0";
     drv_data->input->id.bustype = BUS_USB;
@@ -73,16 +73,40 @@ static int hid_example_probe(struct hid_device* hdev, const struct hid_device_id
     drv_data->input->id.version = hdev->version;
     drv_data->input->dev.parent = &hdev->dev;
 
-    set_bit(EV_REL, drv_data->input->evbit);
     set_bit(REL_X, drv_data->input->relbit);
     set_bit(REL_Y, drv_data->input->relbit);
+
+    set_bit(EV_REL, drv_data->input->evbit);
     set_bit(EV_KEY, drv_data->input->evbit);
     set_bit(EV_ABS, drv_data->input->evbit);
 
+    set_bit(ABS_Z, drv_data->input->absbit);
+    set_bit(ABS_RZ, drv_data->input->absbit);
+    set_bit(ABS_HAT0X, drv_data->input->absbit);
+    set_bit(ABS_HAT0Y, drv_data->input->absbit);
+
+    set_bit(BTN_X, drv_data->input->keybit);
+    set_bit(BTN_Y, drv_data->input->keybit);
+    set_bit(BTN_A, drv_data->input->keybit);
+    set_bit(BTN_B, drv_data->input->keybit);
+    set_bit(BTN_START, drv_data->input->keybit);
+    set_bit(BTN_SELECT, drv_data->input->keybit);
+    set_bit(BTN_TR2, drv_data->input->keybit);
+    set_bit(BTN_TL2, drv_data->input->keybit);
+    set_bit(BTN_TR, drv_data->input->keybit);
+    set_bit(BTN_TL, drv_data->input->keybit);
+    set_bit(BTN_THUMBL, drv_data->input->keybit);
+    set_bit(BTN_THUMBR, drv_data->input->keybit);
+
+    input_set_abs_params(drv_data->input, ABS_X, -128, 127, 4, 8);
+    input_set_abs_params(drv_data->input, ABS_Y, -128, 127, 4, 8);
     input_set_abs_params(drv_data->input, ABS_RX, -128, 127, 4, 8);
     input_set_abs_params(drv_data->input, ABS_RY, -128, 127, 4, 8);
-    input_set_abs_params(drv_data->input, ABS_Z, -128, 127, 4, 8);
-    input_set_abs_params(drv_data->input, ABS_RZ, -128, 127, 4, 8);
+    input_set_abs_params(drv_data->input, ABS_GAS, 0, 255, 4, 8);
+    input_set_abs_params(drv_data->input, ABS_BRAKE, 0, 255, 4, 8);
+
+    input_set_abs_params(drv_data->input, ABS_HAT0X, -1, 1, 0, 0);
+    input_set_abs_params(drv_data->input, ABS_HAT0Y, -1, 1, 0, 0);
 
     ret = input_register_device(drv_data->input);
     if (ret) {
@@ -115,78 +139,56 @@ static void hid_example_remove(struct hid_device* hdev)
     devm_kfree(&hdev->dev, drv_data);
 }
 
-static const char* to_string(__u16 code)
-{
-    switch (code) {
-        case BTN_A:
-            return "A";
-        case BTN_B:
-            return "B";
-        case BTN_X:
-            return "X";
-        case BTN_Y:
-            return "Y";
-        case BTN_TL:
-            return "LB";
-        case BTN_TR:
-            return "RB";
-        case BTN_TL2:
-            return "LT";
-        case BTN_TR2:
-            return "RT";
-        case BTN_START:
-            return "start";
-        case BTN_SELECT:
-            return "select";
-        case BTN_THUMBL:
-            return "LS";
-        case BTN_THUMBR:
-            return "RS";
-        default:
-            break;
-    }
-    return "unk";
-}
-
-static const char* to_string_abs(__u16 code)
-{
-    switch (code) {
-        case ABS_GAS:
-            return "LT";
-        case ABS_BRAKE:
-            return "RT";
-        case ABS_HAT0X:
-            return "Cross";
-        case ABS_X:
-            return "LS_x";
-        case ABS_Y:
-            return "LS_y";
-        case ABS_Z:
-            return "RS_x";
-        case ABS_RZ:
-            return "RS_y";
-        default:
-            break;
-    }
-    return "unk";
-}
-
 static int event_occured(struct hid_device* hdev, struct hid_field* field,
     struct hid_usage* usage, __s32 value)
 {
     switch (usage->type) {
         case EV_KEY:
-            if (value)
-                printk(DEBUG "tap %s\n", to_string(usage->code));
+            input_report_key(drv_data->input, usage->code, value);
             break;
         case EV_ABS:
-            printk(DEBUG " range %s: %i\n", to_string_abs(usage->code), value - 128);
-            if (usage->code == ABS_Z) {
-                input_report_abs(drv_data->input, ABS_RY, value - 128);
-                input_report_rel(drv_data->input, REL_Y, value - 128);
-            } else if (usage->code == ABS_RZ) {
-                input_report_abs(drv_data->input, ABS_RX, value - 128);
-                input_report_rel(drv_data->input, REL_X, value - 128);
+            switch (usage->code) {
+                case ABS_Z:
+                    input_report_abs(drv_data->input, ABS_RX, value - 128);
+                    break;
+                case ABS_RZ:
+                    input_report_abs(drv_data->input, ABS_RY, value - 128);
+                    break;
+                case ABS_GAS:
+                    input_report_abs(drv_data->input, ABS_GAS, value);
+                    break;
+                case ABS_BRAKE:
+                    input_report_abs(drv_data->input, ABS_BRAKE, value);
+                    break;
+                case ABS_HAT0X:
+                    input_report_abs(drv_data->input, ABS_HAT0X, value);
+                    switch (value) {
+                        case 0:
+                            input_report_abs(drv_data->input, ABS_HAT0Y, -1);
+                            input_report_abs(drv_data->input, ABS_HAT0X, 0);
+                            break;
+                        case 2:
+                            input_report_abs(drv_data->input, ABS_HAT0X, 1);
+                            input_report_abs(drv_data->input, ABS_HAT0Y, 0);
+                            break;
+                        case 4:
+                            input_report_abs(drv_data->input, ABS_HAT0Y, 1);
+                            input_report_abs(drv_data->input, ABS_HAT0X, 0);
+                            break;
+                        case 6:
+                            input_report_abs(drv_data->input, ABS_HAT0X, -1);
+                            input_report_abs(drv_data->input, ABS_HAT0Y, 0);
+                            break;
+                        case 8:
+                            input_report_abs(drv_data->input, ABS_HAT0X, 0);
+                            input_report_abs(drv_data->input, ABS_HAT0Y, 0);
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                default:
+                    input_report_abs(drv_data->input, usage->code, value - 128);
             }
             break;
         case EV_SYN:
@@ -203,7 +205,6 @@ static int event_occured(struct hid_device* hdev, struct hid_field* field,
     return 0;
 }
 
-// ====================== СТРУКТУРА ДРАЙВЕРА ======================
 static struct hid_driver hid_example_driver = {
     .name = "wireless_usb",
     .id_table = hid_example_table,
@@ -212,5 +213,4 @@ static struct hid_driver hid_example_driver = {
     .event = event_occured,
 };
 
-// ====================== МОДУЛЬ ======================
 module_hid_driver(hid_example_driver);
